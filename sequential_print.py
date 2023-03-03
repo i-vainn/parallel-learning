@@ -1,7 +1,7 @@
 import os
 
 import torch.distributed as dist
-
+import torch
 
 def run_sequential(rank, size, num_iter=10):
     """
@@ -18,8 +18,18 @@ def run_sequential(rank, size, num_iter=10):
     Process 2
     ```
     """
-
-    pass
+    for it in range(num_iter):
+        for cur_rank in range(size):
+            if rank == cur_rank:
+                [dist.barrier() for _ in range(rank)]
+                print(f'Process {rank}', flush=True)
+                [dist.barrier() for _ in range(rank, size)]
+        
+        if rank + 1 == size and it + 1 < num_iter:
+            print('---', flush=True)
+            dist.barrier()
+        else:
+            dist.barrier()
 
 
 if __name__ == "__main__":
