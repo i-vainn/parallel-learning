@@ -69,8 +69,30 @@ def ring_allreduce(send, rank, size):
         rank: Current process rank (in a range from 0 to size)
         size: Number of workers
     """
-    pass
+    buffer_for_chunk = torch.empty((size,), dtype=torch.float)
+    
+    sent = []
+    total_steps = 2 * (size - 1)
+    send_rk = (rank + 1) % size
+    recv_rk = (rank - 1) % size
 
+    for step in range(1, total_steps + 1):    
+        send_idx = (rank - step + 1) % size
+        recv_idx = (rank - step) % size
+        sent.append(dist.isend(send[send_idx], send_rk))
+        req = dist.irecv(buffer_for_chunk[recv_idx], recv_rk)
+        req.wait()
+
+        if step <= total_steps // 2:
+            send[recv_idx] += buffer_for_chunk[recv_idx]
+        else:
+            send[recv_idx] = buffer_for_chunk[recv_idx]
+    
+    for req in sent:
+        req.wait()
+    
+    send /= size
+    
 
 def run_butterfly_allreduce(rank, size):
     """Simple point-to-point communication."""
@@ -81,12 +103,21 @@ def run_butterfly_allreduce(rank, size):
     print("Rank ", rank, " has data ", tensor)
 
 
+def run_ring_allreduce(rank, size):
+    """Simple point-to-point communication."""
+    torch.manual_seed(rank)
+    tensor = torch.randn((size,), dtype=torch.float)
+    print("Rank ", rank, " has data ", tensor)
+    ring_allreduce(tensor, rank, size)
+    print("Rank ", rank, " has data ", tensor)
+
+
 if __name__ == "__main__":
-    size = 5
+    size = 4
     processes = []
     port = random.randint(25000, 30000)
     for rank in range(size):
-        p = Process(target=init_process, args=(rank, size, run_butterfly_allreduce, port))
+        p = Process(target=init_process, args=(rank, size, run_ring_allreduce, port))
         p.start()
         processes.append(p)
 

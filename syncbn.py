@@ -20,12 +20,30 @@ class sync_batch_norm(Function):
     def forward(ctx, input, running_mean, running_std, eps: float, momentum: float):
         # Compute statistics, sync statistics, apply them to the input
         # Also, store relevant quantities to be used on the backward pass with `ctx.save_for_backward`
-        pass
+        mean = input.mean(1)
+        mean_squares = torch.square(input).mean(1)
+        communication_tensor = torch.cat([mean, mean_squares])
+        dist.all_reduce(communication_tensor)
+        communication_tensor /= dist.get_world_size()
+        cur_mean = communication_tensor[:mean.size(0)]
+        cur_var = communication_tensor[mean.size(0):] - cur_mean ** 2
+        norm_input = (input - cur_mean) / torch.sqrt(cur_var + eps)
+        ctx.save_for_backward(cur_mean, cur_var, norm_input, running_std)
+
+        return norm_input * running_std + running_mean
 
     @staticmethod
     def backward(ctx, grad_output):
-        # don't forget to return a tuple of gradients wrt all arguments of `forward`!
-        pass
+        cur_mean, cur_var, norm_input, running_std = ctx.saved_tensors
+        grad_running_std = norm_input * grad_output
+        grad_running_mean = norm_input
+        grad_output = grad_output * running_std
+        # https://pytorch.org/docs/stable/generated/torch.nn.SyncBatchNorm.html
+        # https://github.com/pytorch/pytorch/blob/master/torch/nn/modules/batchnorm.py
+        # https://github.com/pytorch/pytorch/blob/master/torch/nn/modules/_functions.py
+        # https://kevinzakka.github.io/2016/09/14/batch_normalization/
+        # https://pytorch.org/docs/stable/generated/torch.autograd.function.FunctionCtx.save_for_backward.html
+        
 
 
 class SyncBatchNorm(_BatchNorm):
